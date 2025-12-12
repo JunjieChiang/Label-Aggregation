@@ -1,0 +1,39 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.so
+
+# Virtual/conda environments
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+
+# Data, checkpoints, and vector indexes
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.h5
+*.onnx
+*.tar
+*.tar.gz
+*.npz
+*.npy
+
+# Generated predictions/results
+results/
+
+# Notebook artifacts
+.ipynb_checkpoints/
