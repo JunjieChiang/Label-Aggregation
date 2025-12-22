@@ -111,6 +111,8 @@ class TruthInferencePipeline:
         completed_answers = self.completer.complete(answers)
         print(f"Completion finished. Rows: {len(completed_answers)}. Starting aggregation...", flush=True)
         difficulty_stats = getattr(self.completer, "last_difficulty_stats", None)
+        if difficulty_stats is None:
+            difficulty_stats = getattr(self.aggregator, "last_difficulty_stats", None)
         if cgmatch_split:
             base_stats = difficulty_stats if difficulty_stats is not None else self._summarize_confidence_gap(completed_answers)
             if cgmatch_auto_thresholds:

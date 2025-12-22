@@ -8,6 +8,8 @@ from typing import Dict, Hashable, Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from truth_inference.tiremge import build_difficulty_stats, run_tiremge_prediction
+
 try:  # Optional dependency
     from tqdm import tqdm
 except ImportError:  # pragma: no cover - optional
@@ -304,3 +306,75 @@ class EMLabelCompletion(BaseCompleter):
         if not self.show_progress or tqdm is None:
             return iterable
         return tqdm(iterable, desc=desc, leave=False)
+
+
+class TiReMGELabelCompletion(BaseCompleter):
+    """
+    Graph-based completion that wraps the TiReMGE GCN model from run_tiremge.py.
+
+    The model jointly embeds objects and workers on a bipartite graph constructed
+    from the observed annotations, then predicts the most likely label per object.
+    Missing worker responses are imputed with these predictions.
+    """
+
+    def __init__(
+        self,
+        max_steps: int = 200,
+        learning_rate: float = 1e-2,
+        show_progress: bool = False,
+        seed: int | None = None,
+        cgmatch_in_completion: bool = False,
+    ) -> None:
+        self.max_steps = max(1, int(max_steps))
+        self.learning_rate = learning_rate
+        self.show_progress = show_progress
+        self.seed = seed
+        self.cgmatch_in_completion = cgmatch_in_completion
+        self.last_predictions: pd.Series | None = None
+        self.last_difficulty_stats: pd.DataFrame | None = None
+
+    def complete(self, answers: pd.DataFrame) -> pd.DataFrame:
+        self._validate_answers(answers)
+        clean = answers[["object", "worker", "response"]].dropna().copy()
+        if clean.empty:
+            self.last_predictions = pd.Series(dtype=object)
+            self.last_difficulty_stats = None
+            return clean
+
+        clean["object"] = clean["object"].astype(str)
+        clean["worker"] = clean["worker"].astype(str)
+        clean["response"] = clean["response"].astype(str)
+
+        (
+            objects,
+            workers,
+            labels,
+            predictions,
+            probabilities,
+        ) = run_tiremge_prediction(
+            clean,
+            max_steps=self.max_steps,
+            learning_rate=self.learning_rate,
+            show_progress=self.show_progress,
+            seed=self.seed,
+            desc="TiReMGE completion",
+        )
+
+        completed_records = [
+            (row.object, row.worker, row.response) for row in clean.itertuples(index=False)
+        ]
+        existing = {(row.object, row.worker) for row in clean.itertuples(index=False)}
+        for obj in objects:
+            pred = predictions[obj]
+            for worker in workers:
+                if (obj, worker) in existing:
+                    continue
+                completed_records.append((obj, worker, pred))
+
+        completed_df = pd.DataFrame(completed_records, columns=["object", "worker", "response"])
+        self.last_predictions = pd.Series([predictions[obj] for obj in objects], index=objects)
+        if self.cgmatch_in_completion:
+            self.last_difficulty_stats = build_difficulty_stats(objects, probabilities)
+        else:
+            self.last_difficulty_stats = None
+        return completed_df

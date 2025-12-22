@@ -1,6 +1,5 @@
 """
-python main.py --dataset trec_crowd --completion em --aggregation mv \
-  --completion-workers 4 --aggregation-workers 4 --progress --save-results
+python main.py --dataset leaves --completion tiremge --cgmatch-in-iter --cgmatch-split --cgmatch-auto-thresholds --plot-difficulty --save-results --progress --completion-workers 4 --aggregation-workers 4
 
 """
 
@@ -9,14 +8,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 from typing import Dict
 
+import numpy as np
 import pandas as pd
 
-from truth_inference.aggregators import MajorityVoteAggregator
-from truth_inference.completers import EMLabelCompletion, NoneCompleter
-from truth_inference.joint_models import EMJointModel
+from truth_inference.aggregators import MajorityVoteAggregator, TiReMGEAggregator
+from truth_inference.completers import EMLabelCompletion, NoneCompleter, TiReMGELabelCompletion
 from truth_inference.pipeline import TruthInferencePipeline, load_dataset, compute_accuracy
 
 
@@ -31,8 +31,16 @@ def _build_completer(name: str, args: argparse.Namespace):
             convergence_tol=args.em_tol,
             num_workers=args.completion_workers,
             show_progress=args.progress,
-            cgmatch_in_em=args.em_cgmatch_in_iter,
+            cgmatch_in_em=args.cgmatch_in_iter,
             cgmatch_momentum=args.cgmatch_momentum,
+        )
+    if normalized == "tiremge":
+        return TiReMGELabelCompletion(
+            max_steps=args.tiremge_steps,
+            learning_rate=args.tiremge_learning_rate,
+            show_progress=args.progress,
+            seed=args.seed,
+            cgmatch_in_completion=args.cgmatch_in_iter,
         )
     raise ValueError(f"Unsupported completion algorithm: {name}")
 
@@ -41,21 +49,15 @@ def _build_aggregator(name: str, args: argparse.Namespace):
     normalized = name.lower()
     if normalized == "mv":
         return MajorityVoteAggregator(num_workers=args.aggregation_workers, show_progress=args.progress)
-    raise ValueError(f"Unsupported aggregation algorithm: {name}")
-
-
-def _build_joint_model(name: str, args: argparse.Namespace):
-    normalized = name.lower()
-    if normalized == "em":
-        return EMJointModel(
-            max_iters=args.em_iters,
-            smoothing=args.em_smoothing,
-            convergence_tol=args.em_tol,
-            num_workers=args.completion_workers,
+    if normalized == "tiremge":
+        return TiReMGEAggregator(
+            max_steps=args.tiremge_steps,
+            learning_rate=args.tiremge_learning_rate,
             show_progress=args.progress,
-            missing_weight=args.joint_missing_weight,
+            seed=args.seed,
+            cgmatch_stats=args.cgmatch_in_iter,
         )
-    raise ValueError(f"Unsupported joint model: {name}")
+    raise ValueError(f"Unsupported aggregation algorithm: {name}")
 
 
 def _save_outputs(
@@ -123,25 +125,6 @@ def _plot_difficulty_scatter(
 
 def _run_pipeline(args: argparse.Namespace) -> None:
     answers, truth = load_dataset(args.dataset, data_root=args.data_root)
-    if args.joint != "none":
-        joint_model = _build_joint_model(args.joint, args)
-        print("Running joint model...", flush=True)
-        result = joint_model.run(answers)
-        accuracy = compute_accuracy(result["predictions"], truth)
-        print(f"Dataset: {args.dataset}")
-        print(f"Joint model: {args.joint}")
-        print(f"Accuracy: {accuracy:.4f}")
-        if args.save_results:
-            _save_outputs(
-                args.dataset,
-                Path(args.results_dir),
-                result["completed_answers"],
-                result["predictions"],
-                {"accuracy": accuracy},
-            )
-            print(f"Saved outputs to {Path(args.results_dir) / args.dataset}")
-        return
-
     completer = _build_completer(args.completion, args)
     aggregator = _build_aggregator(args.aggregation, args)
     pipeline = TruthInferencePipeline(completer, aggregator)
@@ -190,72 +173,42 @@ def _run_pipeline(args: argparse.Namespace) -> None:
         print(f"Saved outputs to {Path(args.results_dir) / args.dataset}")
 
 
-def _synthetic_dataset() -> tuple[pd.DataFrame, pd.DataFrame]:
-    answers = pd.DataFrame(
-        [
-            ("t1", "w1", "0"),
-            ("t1", "w2", "0"),
-            ("t1", "w3", "1"),
-            ("t2", "w1", "1"),
-            ("t2", "w2", "0"),
-            ("t3", "w2", "1"),
-        ],
-        columns=["object", "worker", "response"],
-    )
-    truth = pd.DataFrame(
-        [
-            ("t1", "0"),
-            ("t2", "1"),
-            ("t3", "1"),
-        ],
-        columns=["object", "truth"],
-    )
-    return answers, truth
-
-
-def run_demo() -> None:
-    answers, truth = _synthetic_dataset()
-    aggregator = MajorityVoteAggregator()
-
-    mv_pipeline = TruthInferencePipeline(NoneCompleter(), aggregator)
-    mv_result = mv_pipeline.run(answers, truth)
-    print("[Demo] No completion + MV accuracy:", mv_result["accuracy"])
-
-    em_pipeline = TruthInferencePipeline(EMLabelCompletion(max_iters=8), aggregator)
-    em_result = em_pipeline.run(answers, truth)
-    print("[Demo] EM completion + MV accuracy:", em_result["accuracy"])
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Truth inference with pluggable label completion and aggregation.")
     parser.add_argument("--dataset", help="Dataset name (expects data/<dataset>/answer.csv and truth.csv)")
     parser.add_argument("--data-root", default="data", help="Root directory containing dataset subfolders.")
     parser.add_argument(
-        "--joint",
-        default="none",
-        choices=["none", "em"],
-        help="Run a joint model (skips separate completion+aggregation).",
-    )
-    parser.add_argument(
         "--completion",
         default="none",
-        choices=["none", "em"],
+        choices=["none", "em", "tiremge"],
         help="Label completion algorithm to use.",
     )
     parser.add_argument(
         "--aggregation",
         default="mv",
-        choices=["mv"],
+        choices=["mv", "tiremge"],
         help="Aggregation algorithm to use after completion.",
     )
     parser.add_argument("--em-iters", type=int, default=100, help="Maximum EM iterations for em completion.")
     parser.add_argument("--em-smoothing", type=float, default=1e-2, help="Laplace smoothing for worker confusion matrices.")
     parser.add_argument("--em-tol", type=float, default=1e-5, help="Convergence tolerance on posteriors for em completion.")
     parser.add_argument(
-        "--joint-missing-weight",
+        "--tiremge-steps",
+        type=int,
+        default=200,
+        help="Training iterations for the TiReMGE graph completion (used with --completion tiremge).",
+    )
+    parser.add_argument(
+        "--tiremge-learning-rate",
         type=float,
-        default=0.5,
-        help="Weight of missing-label expectations in joint EM (0 disables missing contribution).",
+        default=1e-2,
+        help="Learning rate for TiReMGE (used with --completion tiremge).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Global random seed for reproducibility.",
     )
     parser.add_argument(
         "--completion-workers",
@@ -270,14 +223,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of worker threads for aggregation.",
     )
     parser.add_argument(
-        "--em-cgmatch-in-iter",
+        "--cgmatch-in-iter",
         action="store_true",
-        help="Enable CGMatch thresholds during EM completion (dynamic easy/ambiguous/hard per iteration).",
+        help="Enable CGMatch-style stats during completion (EM or TiReMGE) for downstream difficulty splitting.",
     )
     parser.add_argument(
         "--cgmatch-momentum",
         type=float,
-        default=0.9,
+        default=0.999,
         help="Momentum for EMA thresholds (tau_e, tau_a) inside EM when CGMatch is enabled.",
     )
     parser.add_argument(
@@ -290,12 +243,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="If set, save completed answers, predictions, and metrics to results/<dataset>/.",
     )
-    parser.add_argument("--results-dir", default="results", help="Directory root used when saving outputs.")
-    parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="Run a small synthetic sanity check instead of a real dataset.",
-    )
+    parser.add_argument("--results-dir", default="results/tiremge", help="Directory root used when saving outputs.")
     parser.add_argument(
         "--cgmatch-split",
         action="store_true",
@@ -341,11 +289,21 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    if args.demo:
-        run_demo()
-        return
     if not args.dataset:
-        parser.error("Please provide --dataset or use --demo for a synthetic run.")
+        parser.error("Please provide --dataset.")
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        try:
+            import tensorflow as tf
+        except ImportError:
+            tf = None
+        if tf is not None:
+            tf.random.set_seed(args.seed)
+            try:
+                tf.config.experimental.enable_op_determinism(True)
+            except (AttributeError, TypeError):
+                pass
     _run_pipeline(args)
 
 

@@ -4,8 +4,9 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Hashable, Iterable, Mapping, Sequence, Tuple
-
 import pandas as pd
+
+from truth_inference.tiremge import build_difficulty_stats, run_tiremge_prediction
 
 try:  # Optional dependency
     from tqdm import tqdm
@@ -83,3 +84,43 @@ class MajorityVoteAggregator(BaseAggregator):
         if not self.show_progress or tqdm is None:
             return None
         return tqdm(total=total, desc=desc, leave=False)
+
+
+class TiReMGEAggregator(BaseAggregator):
+    def __init__(
+        self,
+        max_steps: int = 200,
+        learning_rate: float = 1e-2,
+        show_progress: bool = False,
+        seed: int | None = None,
+        cgmatch_stats: bool = False,
+    ) -> None:
+        self.max_steps = max(1, int(max_steps))
+        self.learning_rate = learning_rate
+        self.show_progress = show_progress
+        self.seed = seed
+        self.cgmatch_stats = cgmatch_stats
+        self.last_difficulty_stats: pd.DataFrame | None = None
+
+    def aggregate(self, completed_answers: pd.DataFrame) -> pd.Series:
+        MajorityVoteAggregator._validate_columns(completed_answers)
+        clean = completed_answers[["object", "worker", "response"]].dropna().copy()
+        if clean.empty:
+            self.last_difficulty_stats = None
+            return pd.Series(dtype=object)
+        clean["object"] = clean["object"].astype(str)
+        clean["worker"] = clean["worker"].astype(str)
+        clean["response"] = clean["response"].astype(str)
+        objects, _, _, predictions, probabilities = run_tiremge_prediction(
+            clean,
+            max_steps=self.max_steps,
+            learning_rate=self.learning_rate,
+            show_progress=self.show_progress,
+            seed=self.seed,
+            desc="TiReMGE aggregation",
+        )
+        if self.cgmatch_stats:
+            self.last_difficulty_stats = build_difficulty_stats(objects, probabilities)
+        else:
+            self.last_difficulty_stats = None
+        return pd.Series([predictions[obj] for obj in objects], index=objects)

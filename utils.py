@@ -24,20 +24,24 @@ def get_adj(edge_index, node_num):
 #@tf.function
 def update_reliability(embedding, triple, source_num, reliability):
     object_index, source_index, claims = triple
-    object_num = max(object_index)+1
-    source_num = max(source_index)+1
-    node_num = object_num + source_num
+    object_num = tf.reduce_max(object_index) + 1
+    source_num_dynamic = tf.reduce_max(source_index) + 1
+    node_num = object_num + source_num_dynamic
 
     weights = tf.gather(reliability, source_index)
     object_embedd = tf.gather(embedding, object_index)
     distance = tf.sqrt(tf.reduce_sum(tf.square(object_embedd - claims), axis=-1)) * weights  # * weights tf.sqrt
     weight = tf.square(tf.math.unsorted_segment_sum(data=distance, segment_ids=source_index, num_segments=source_num))
-    weight /= tf.reduce_sum(weight)
+    weight_sum = tf.reduce_sum(weight)
+    weight = tf.where(weight_sum > 0, weight / weight_sum, weight)
     r = tf.math.exp(-tf.sqrt(weight))
 
     r_temp = tf.cast(tf.reshape(r, (-1, 1)), dtype=tf.float32)
 
-    source_embedd = tf.gather(embedding, np.array(range(object_num, node_num)))
+    start = tf.cast(object_num, dtype=tf.int32)
+    end = tf.cast(node_num, dtype=tf.int32)
+    source_indices = tf.range(start, end)
+    source_embedd = tf.gather(embedding, source_indices)
     f1 = tf.matmul(source_embedd, source_embedd, transpose_b=True)
     a = tf.reshape(tf.reduce_sum(tf.math.square(source_embedd), axis=-1), (-1, 1))
     f2 = tf.math.sqrt(tf.matmul(a, a, transpose_b=True))
