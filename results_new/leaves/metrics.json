@@ -1,0 +1,17 @@
+{
+  "dataset": "leaves",
+  "completion": "gcn",
+  "aggregater": "mv",
+  "before_accuracy": 0.6370757180156658,
+  "full_accuracy": 0.6449086161879896,
+  "bucket_accuracy": {
+    "easy": 0.9791666666666666,
+    "ambiguous": 1.0,
+    "hard": 0.5314685314685315
+  },
+  "difficulty_split_counts": {
+    "hard": 287,
+    "easy": 96,
+    "ambiguous": 1
+  }
+}

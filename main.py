@@ -201,7 +201,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tiremge-learning-rate",
         type=float,
-        default=1e-2,
+        default=1e-3,
         help="Learning rate for TiReMGE (used with --completion tiremge).",
     )
     parser.add_argument(

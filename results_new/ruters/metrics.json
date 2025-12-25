@@ -1,0 +1,17 @@
+{
+  "dataset": "ruters",
+  "completion": "gcn",
+  "aggregater": "mv",
+  "before_accuracy": 0.7126050420168067,
+  "full_accuracy": 0.6694677871148459,
+  "bucket_accuracy": {
+    "easy": 0.8277404921700223,
+    "ambiguous": 1.0,
+    "hard": 0.5985915492957746
+  },
+  "difficulty_split_counts": {
+    "hard": 1279,
+    "easy": 447,
+    "ambiguous": 60
+  }
+}

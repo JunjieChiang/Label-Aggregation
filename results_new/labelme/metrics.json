@@ -1,0 +1,17 @@
+{
+  "dataset": "labelme",
+  "completion": "gcn",
+  "aggregater": "mv",
+  "before_accuracy": 0.7697697697697697,
+  "full_accuracy": 0.7627627627627628,
+  "bucket_accuracy": {
+    "easy": 0.868,
+    "ambiguous": 0.8888888888888888,
+    "hard": 0.7256756756756757
+  },
+  "difficulty_split_counts": {
+    "hard": 741,
+    "easy": 250,
+    "ambiguous": 9
+  }
+}
